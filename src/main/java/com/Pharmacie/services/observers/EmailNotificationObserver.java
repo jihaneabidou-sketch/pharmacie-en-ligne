@@ -1,14 +1,17 @@
 package com.Pharmacie.services.observers;
 
-import com.Pharmacie.models.Prescription;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+
+import com.Pharmacie.enLigne.models.Prescription;
 
 @Component
 public class EmailNotificationObserver implements PrescriptionObserver {
+
+    @Async // Traitement asynchro
     @Override
     public void onStatusChanged(Prescription prescription) {
-        // Log ou simulation d'envoi d'email asynchrone
-        System.out.println("[Notification EMAIL] Envoyée à " + prescription.getPatient().getEmail() 
-            + " : Votre ordonnance N°" + prescription.getId() + " est désormais : " + prescription.getStatus());
+        System.out.println("[OBSERVER NOTIFICATION] Email envoyé au patient " + prescription.getPatient().getFullName()
+                + " : Votre ordonnance #" + prescription.getId() + " est désormais : " + prescription.getStatus());
     }
 }

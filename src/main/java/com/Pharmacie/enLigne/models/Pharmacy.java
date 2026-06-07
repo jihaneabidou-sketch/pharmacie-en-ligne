@@ -1,4 +1,4 @@
-package com.Pharmacie.models;
+package com.Pharmacie.enLigne.models;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;

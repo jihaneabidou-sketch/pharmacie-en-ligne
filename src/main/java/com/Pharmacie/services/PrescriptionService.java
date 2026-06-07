@@ -1,62 +1,77 @@
 package com.Pharmacie.services;
 
-import com.Pharmacie.models.Prescription;
-import com.Pharmacie.models.PrescriptionStatus;
+import com.Pharmacie.enLigne.models.Prescription;
+import com.Pharmacie.enLigne.models.PrescriptionStatus;
 import com.Pharmacie.repositories.PrescriptionRepository;
-import com.Pharmacie.services.observers.PrescriptionObserver;
+import com.Pharmacie.services.observers.EmailNotificationObserver;
 import com.Pharmacie.services.strategies.PriceCalculationStrategy;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class PrescriptionService {
 
-    private final PrescriptionRepository prescriptionRepository;
-    private final Map<String, PriceCalculationStrategy> pricingStrategies;
-    private final List<PrescriptionObserver> observers;
+    @Autowired
+    private PrescriptionRepository prescriptionRepository;
 
-    // Injection automatique de toutes les stratégies et observateurs par Spring
-    public PrescriptionService(PrescriptionRepository prescriptionRepository, 
-                               Map<String, PriceCalculationStrategy> pricingStrategies,
-                               List<PrescriptionObserver> observers) {
-        this.prescriptionRepository = prescriptionRepository;
-        this.pricingStrategies = pricingStrategies;
-        this.observers = observers;
+    @Autowired
+    private EmailNotificationObserver notificationObserver;
+
+    @Autowired
+    @Qualifier("STANDARD")
+    private PriceCalculationStrategy standardStrategy;
+
+    @Autowired
+    @Qualifier("INSURANCE")
+    private PriceCalculationStrategy insuranceStrategy;
+
+    // Accueil Patient (`visily-accueil-patient.jpg`)
+    public List<Prescription> getPatientHistory(Long patientId) {
+        return prescriptionRepository.findByPatientIdOrderByCreatedAtDesc(patientId);
     }
 
-    // Fonctionnalité Pharmacien : Prendre en charge et mettre à jour le statut
-    public Prescription updateStatus(Long prescriptionId, PrescriptionStatus newStatus) {
+    // File d'attente Pharmacien (`visily-tableau-de-bord-pharmacien.jpg`)
+    public List<Prescription> getPharmacyQueue(Long pharmacyId, PrescriptionStatus status) {
+        return prescriptionRepository.findByPharmacyIdAndStatus(pharmacyId, status);
+    }
+
+    // Soumettre une ordonnance (`visily-soumettre-ordonnance.jpg`)
+    public Prescription savePrescription(Prescription prescription) {
+        prescription.setStatus(PrescriptionStatus.RECUE);
+        return prescriptionRepository.save(prescription);
+    }
+
+    // Traitement de l'ordonnance (`visily-détail-ordonnance.jpg`)
+    public Prescription updateStatusAndCalculatePrice(Long prescriptionId, PrescriptionStatus newStatus, double baseAmount, boolean hasInsurance) {
         Prescription prescription = prescriptionRepository.findById(prescriptionId)
                 .orElseThrow(() -> new RuntimeException("Ordonnance introuvable"));
 
         prescription.setStatus(newStatus);
-        Prescription updated = prescriptionRepository.save(prescription);
 
-        // Déclenchement automatique du Pattern Observer
-        observers.forEach(observer -> observer.onStatusChanged(updated));
+        // Application du pattern Strategy lors de la validation finale
+        if (newStatus == PrescriptionStatus.PRETE) {
+            PriceCalculationStrategy strategy = hasInsurance ? insuranceStrategy : standardStrategy;
+            prescription.setTotalAmount(strategy.calculatePrice(baseAmount));
+        }
 
-        return updated;
+        Prescription updatedPrescription = prescriptionRepository.save(prescription);
+
+        // Alerte via l'Observer
+        notificationObserver.onStatusChanged(updatedPrescription);
+
+        return updatedPrescription;
     }
 
-    // Fonctionnalité Pharmacien : Saisie du montant brut + Calcul final avec Strategy
-    public Prescription finalizeOrder(Long prescriptionId, double baseAmount, String strategyType) {
-        Prescription prescription = prescriptionRepository.findById(prescriptionId)
-                .orElseThrow(() -> new RuntimeException("Ordonnance introuvable"));
-
-        // Sélection dynamique de la stratégie (STANDARD, REDUCED, INSURANCE)
-        PriceCalculationStrategy strategy = pricingStrategies.getOrDefault(strategyType.toUpperCase(), 
-                pricingStrategies.get("STANDARD"));
-
-        double finalPrice = strategy.calculatePrice(baseAmount);
-        prescription.setTotalAmount(finalPrice);
-        prescription.setStatus(PrescriptionStatus.PRETE);
-
-        Prescription saved = prescriptionRepository.save(prescription);
-
-        // Notification automatique de fin de préparation
-        observers.forEach(observer -> observer.onStatusChanged(saved));
-
-        return saved;
+    // Compteurs du tableau de bord pharmacien
+    public Map<String, Long> getPharmacyStats(Long pharmacyId) {
+        return Map.of(
+            "RECUE", prescriptionRepository.countByPharmacyIdAndStatus(pharmacyId, PrescriptionStatus.RECUE),
+            "EN_PREPARATION", prescriptionRepository.countByPharmacyIdAndStatus(pharmacyId, PrescriptionStatus.EN_PREPARATION),
+            "PRETE", prescriptionRepository.countByPharmacyIdAndStatus(pharmacyId, PrescriptionStatus.PRETE)
+        );
     }
 }
